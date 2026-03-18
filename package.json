@@ -1,5 +1,6 @@
 {
   "name": "certificate",
+  "homepage": "https://halords.github.io/certificate-generator",
   "private": true,
   "version": "0.0.0",
   "type": "module",
