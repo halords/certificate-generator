@@ -4,14 +4,14 @@ import { fabric } from 'fabric'
 import { Type, Trash2, ChevronRight, Layout, Settings2, Palette, ListChecks, Type as FontIcon, AlignLeft, AlignCenter, AlignRight, Maximize, WrapText, ArrowRightToLine, Upload, Save, Bookmark, X, Plus, FileUp, Download, Edit2, Check } from 'lucide-react'
 
 const CanvasEditor = () => {
-  const { templateUrl, textFields, setTextFields, setStep, setTemplateDimensions } = useStore()
+  const { templateUrl, textFields, setTextFields, setStep, setTemplateDimensions, builtInPresets, setBuiltInPresets, customFonts, setCustomFonts, addCustomFont } = useStore()
   const canvasRef = useRef(null)
   const fabricCanvas = useRef(null)
   
   // Track selected by ID for better React state syncing
   const [selectedId, setSelectedId] = useState(null)
   const [refreshCounter, setRefreshCounter] = useState(0) // Used to force re-renders of the sidebar
-  const [presets, setPresets] = useState([])
+  const [localStoragePresets, setLocalStoragePresets] = useState([])
   const [showSaveNaming, setShowSaveNaming] = useState(false)
   const [newPresetName, setNewPresetName] = useState('')
   const [loadCounter, setLoadCounter] = useState(0)
@@ -26,12 +26,65 @@ const CanvasEditor = () => {
   const templateInputRef = useRef(null)
   const importInputRef = useRef(null)
 
+  // Dynamic import of built-in presets
+  useEffect(() => {
+    const presetModules = import.meta.glob('/src/assets/presets/*.json', { eager: true });
+    const loadedPresets = Object.values(presetModules).map(module => module.default || module);
+    setBuiltInPresets(loadedPresets);
+  }, []);
+
+  // Auto-load fonts from src/assets/fonts
+  useEffect(() => {
+    const fontModules = import.meta.glob('/src/assets/fonts/*.{ttf,otf}', { as: 'url', eager: true });
+    
+    const loadFonts = async () => {
+      const fontList = [];
+      for (const [path, url] of Object.entries(fontModules)) {
+        const baseName = path.split('/').pop().split('.').slice(0, -1).join('.');
+        const fontFamilyName = baseName.replace(/[^a-zA-Z0-9]/g, '');
+        
+        try {
+          const response = await fetch(url);
+          const blob = await response.blob();
+          const reader = new FileReader();
+          
+          await new Promise((resolve) => {
+            reader.onloadend = () => {
+              const dataUri = reader.result;
+              fontList.push({ name: fontFamilyName, dataUri });
+              
+              // Also inject into document head for Fabric.js
+              const newStyle = document.createElement('style');
+              newStyle.appendChild(document.createTextNode(`
+                @font-face {
+                  font-family: '${fontFamilyName}';
+                  src: url('${dataUri}');
+                }
+              `));
+              document.head.appendChild(newStyle);
+              resolve();
+            };
+            reader.readAsDataURL(blob);
+          });
+        } catch (err) {
+          console.error(`Failed to load font: ${fontFamilyName}`, err);
+        }
+      }
+      setCustomFonts(fontList);
+    };
+
+    loadFonts();
+  }, []);
+
+  // Combine built-in and localStorage presets
+  const allPresets = [...builtInPresets, ...localStoragePresets];
+
   // Load presets from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem('certificate_presets')
     if (saved) {
       try {
-        setPresets(JSON.parse(saved))
+        setLocalStoragePresets(JSON.parse(saved))
       } catch (e) {
         console.error("Failed to parse presets", e)
       }
@@ -58,13 +111,14 @@ const CanvasEditor = () => {
       timestamp: new Date().toISOString()
     }
 
-    const updatedPresets = [newPreset, ...presets]
+    const updatedPresets = [newPreset, ...localStoragePresets]
     
     try {
       localStorage.setItem('certificate_presets', JSON.stringify(updatedPresets))
-      setPresets(updatedPresets)
+      setLocalStoragePresets(updatedPresets)
       setShowSaveNaming(false)
       setNewPresetName('')
+      setActivePresetId(newPreset.id)
     } catch (e) {
       alert("Failed to save preset. Storage may be full (max 5MB). Try deleting old presets.")
       console.error(e)
@@ -90,8 +144,17 @@ const CanvasEditor = () => {
 
   const updatePreset = (id, e) => {
     if (e) e.stopPropagation()
-    const preset = presets.find(p => p.id === id)
+    const preset = allPresets.find(p => p.id === id)
     if (!preset) return
+
+    // If it's a built-in preset, we can't "update" the file, 
+    // so we prompt to save as a new local preset.
+    const isBuiltIn = builtInPresets.some(p => p.id === id)
+    if (isBuiltIn) {
+      setNewPresetName(`${preset.name} (Copy)`)
+      setShowSaveNaming(true)
+      return
+    }
 
     if (!window.confirm(`Update preset "${preset.name}" with current design?`)) return
 
@@ -102,7 +165,7 @@ const CanvasEditor = () => {
         .map(f => f.fontFamily)
     )]
 
-    const updatedPresets = presets.map(p => 
+    const updatedPresets = localStoragePresets.map(p => 
       p.id === id 
         ? { ...p, templateUrl, textFields, requiredCustomFonts, timestamp: new Date().toISOString() } 
         : p
@@ -110,7 +173,7 @@ const CanvasEditor = () => {
 
     try {
       localStorage.setItem('certificate_presets', JSON.stringify(updatedPresets))
-      setPresets(updatedPresets)
+      setLocalStoragePresets(updatedPresets)
       setActivePresetId(id)
     } catch (e) {
       alert("Failed to update preset. Storage may be full.")
@@ -120,11 +183,17 @@ const CanvasEditor = () => {
 
   const deletePreset = (id, e) => {
     e.stopPropagation()
+    const isBuiltIn = builtInPresets.some(p => p.id === id)
+    if (isBuiltIn) {
+      alert("Cannot delete built-in presets.")
+      return
+    }
+
     if (!window.confirm("Delete this preset?")) return
     
-    const updatedPresets = presets.filter(p => p.id !== id)
+    const updatedPresets = localStoragePresets.filter(p => p.id !== id)
     localStorage.setItem('certificate_presets', JSON.stringify(updatedPresets))
-    setPresets(updatedPresets)
+    setLocalStoragePresets(updatedPresets)
     if (activePresetId === id) setActivePresetId(null)
   }
 
@@ -159,9 +228,9 @@ const CanvasEditor = () => {
         importedPreset.id = Date.now().toString()
         importedPreset.timestamp = new Date().toISOString()
 
-        const updatedPresets = [importedPreset, ...presets]
+        const updatedPresets = [importedPreset, ...localStoragePresets]
         localStorage.setItem('certificate_presets', JSON.stringify(updatedPresets))
-        setPresets(updatedPresets)
+        setLocalStoragePresets(updatedPresets)
         alert(`Preset "${importedPreset.name}" imported successfully!`)
       } catch (e) {
         console.error("Failed to import preset", e)
@@ -211,9 +280,15 @@ const CanvasEditor = () => {
 
   const renamePreset = (id, newName) => {
     if (!newName.trim()) return
-    const updatedPresets = presets.map(p => p.id === id ? { ...p, name: newName.trim() } : p)
+    const isBuiltIn = builtInPresets.some(p => p.id === id)
+    if (isBuiltIn) {
+        alert("Cannot rename built-in presets.")
+        setRenamingId(null)
+        return
+    }
+    const updatedPresets = localStoragePresets.map(p => p.id === id ? { ...p, name: newName.trim() } : p)
     localStorage.setItem('certificate_presets', JSON.stringify(updatedPresets))
-    setPresets(updatedPresets)
+    setLocalStoragePresets(updatedPresets)
     setRenamingId(null)
   }
 
@@ -770,12 +845,14 @@ const CanvasEditor = () => {
             )}
 
             <div className="grid grid-cols-1 gap-2">
-              {presets.length === 0 ? (
+              {allPresets.length === 0 ? (
                 <div className="text-[10px] text-slate-400 italic font-medium px-1">
                   No saved designs yet.
                 </div>
               ) : (
-                presets.map(preset => (
+                allPresets.map(preset => {
+                  const isBuiltIn = builtInPresets.some(p => p.id === preset.id);
+                  return (
                   <div 
                     key={preset.id}
                     onClick={() => loadPreset(preset)}
@@ -862,7 +939,8 @@ const CanvasEditor = () => {
                       )}
                     </div>
                   </div>
-                ))
+                  )
+                })
               )}
             </div>
             <div className="h-px bg-slate-100 w-full mt-4"></div>

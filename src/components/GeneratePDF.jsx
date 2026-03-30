@@ -1,31 +1,37 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useStore } from '../store/useStore'
 import { jsPDF } from 'jspdf'
-import { Download, FileText, Loader2, PartyPopper, RefreshCw, CheckCircle2, Layout, X } from 'lucide-react'
+import { Download, FileText, Loader2, PartyPopper, RefreshCw, CheckCircle2, Layout, X, Search, Eye } from 'lucide-react'
 
 const GeneratePDF = () => {
   const { templateUrl, textFields, csvData, setStep, templateDimensions, customFonts } = useStore()
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [completed, setCompleted] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const getAvailableFontStyle = (doc, family, requestedStyle) => {
+    const list = doc.getFontList?.()
+    const styles = list?.[family]
+    if (!styles) return null
+    if (styles.includes(requestedStyle)) return requestedStyle
+    if (styles.includes('normal')) return 'normal'
+    return styles[0] || null
+  }
 
   // Helper to split text into normal and ordinal parts
   const parseOrdinals = (text) => {
     if (!text) return [{ text: '', isSup: false }]
-    // Match numbers followed by st, nd, rd, th (case insensitive)
     const regex = /(\d+)(st|nd|rd|th)\b/gi
     const parts = []
     let lastIndex = 0
     let match
 
     while ((match = regex.exec(text)) !== null) {
-      // Text before the match
       if (match.index > lastIndex) {
         parts.push({ text: text.substring(lastIndex, match.index), isSup: false })
       }
-      // The number part
       parts.push({ text: match[1], isSup: false })
-      // The ordinal suffix
       parts.push({ text: match[2], isSup: true })
       lastIndex = regex.lastIndex
     }
@@ -36,8 +42,20 @@ const GeneratePDF = () => {
     return parts
   }
 
-  const generate = async () => {
-    if (!templateUrl || !csvData || csvData.length === 0 || !templateDimensions.width) return
+  const filteredData = useMemo(() => {
+    if (!csvData) return []
+    const reversed = [...csvData].reverse()
+    if (!searchTerm) return reversed
+    return reversed.filter(row => 
+      Object.values(row).some(val => 
+        String(val).toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    )
+  }, [csvData, searchTerm])
+
+  const generate = async (singleRow = null) => {
+    const dataToProcess = singleRow ? [singleRow] : csvData
+    if (!templateUrl || !dataToProcess || dataToProcess.length === 0 || !templateDimensions.width) return
 
     setGenerating(true)
     setProgress(0)
@@ -45,38 +63,35 @@ const GeneratePDF = () => {
     try {
       const { width: imgWidth, height: imgHeight, scale: canvasScale } = templateDimensions
 
-      // Initialize PDF to match original image dimensions exactly
       const doc = new jsPDF({
         orientation: imgWidth > imgHeight ? 'l' : 'p',
         unit: 'px',
         format: [imgWidth, imgHeight]
       })
 
-      const total = csvData.length
+      const total = dataToProcess.length
 
-      // Load Custom Fonts into jsPDF
       if (customFonts && customFonts.length > 0) {
-        customFonts.forEach(font => {
-          // dataUri is typically "data:font/ttf;base64,AAEAAAA..." or similar
-          const base64Str = font.dataUri.split(',')[1];
+        customFonts.forEach((font) => {
+          const base64Str = font.dataUri.split(',')[1]
           if (base64Str) {
-            doc.addFileToVFS(`${font.name}.ttf`, base64Str);
-            doc.addFont(`${font.name}.ttf`, font.name, 'normal');
+            const filename = `${font.name}.ttf`
+            doc.addFileToVFS(filename, base64Str)
+            doc.addFont(filename, font.name, 'normal')
+            doc.addFont(filename, font.name, 'bold')
+            doc.addFont(filename, font.name, 'italic')
+            doc.addFont(filename, font.name, 'bolditalic')
           }
-        });
+        })
       }
 
       for (let i = 0; i < total; i++) {
         if (i > 0) doc.addPage([imgWidth, imgHeight])
 
-        const row = csvData[i]
-
-        // 1. Add background image
+        const row = dataToProcess[i]
         doc.addImage(templateUrl, 'PNG', 0, 0, imgWidth, imgHeight)
 
-        // 2. Add text fields
         textFields.forEach(field => {
-          // Fallback to exactly what the canvas displays if no CSV data matches
           const fallbackText = (field.text && !field.text.startsWith('{{')) ? field.text : field.name.toUpperCase();
           const value = String(row[field.name] || fallbackText)
 
@@ -87,65 +102,59 @@ const GeneratePDF = () => {
 
           doc.setTextColor(field.fill)
 
-          let styleString = 'normal';
+          let styleString = 'normal'
           if (field.fontWeight === 'bold' && field.fontStyle === 'italic') {
-            styleString = 'bolditalic';
+            styleString = 'bolditalic'
           } else if (field.fontWeight === 'bold') {
-            styleString = 'bold';
+            styleString = 'bold'
           } else if (field.fontStyle === 'italic') {
-            styleString = 'italic';
+            styleString = 'italic'
           }
 
           if (field.fontFamily) {
-            doc.setFont(field.fontFamily, styleString);
+            const availableStyle = getAvailableFontStyle(doc, field.fontFamily, styleString)
+            if (availableStyle) doc.setFont(field.fontFamily, availableStyle)
+            else doc.setFont('helvetica', styleString)
           } else {
-            doc.setFont('helvetica', styleString);
+            doc.setFont('helvetica', styleString)
           }
 
-          let finalLines = [value]
-          let textX = pdfX
-
-          // Apply Alignment Offset
+          let startX = pdfX
           if (field.textAlign === 'center') {
-            textX = pdfX + (pdfWidth / 2)
+            startX = pdfX + (pdfWidth / 2)
           } else if (field.textAlign === 'right') {
-            textX = pdfX + pdfWidth
+            startX = pdfX + pdfWidth
           }
 
           if (field.textBehavior === 'shrink') {
-            // Shrink to Fit
             doc.setFontSize(pdfFontSize)
             let textWidth = doc.getTextWidth(value)
-
             while (textWidth > pdfWidth && pdfFontSize > 4) {
               pdfFontSize -= 0.5
               doc.setFontSize(pdfFontSize)
               textWidth = doc.getTextWidth(value)
             }
-            renderTextChunks(doc, value, textX, pdfY, pdfFontSize, field.textAlign, pdfWidth)
+            renderTextChunks(doc, value, startX, pdfY, pdfFontSize, field.textAlign)
           } else if (field.textBehavior === 'wrap') {
-            // Paragraph Wrap
             doc.setFontSize(pdfFontSize)
-            finalLines = doc.splitTextToSize(value, pdfWidth)
+            const finalLines = doc.splitTextToSize(value, pdfWidth)
             finalLines.forEach((line, idx) => {
-              renderTextChunks(doc, line, textX, pdfY + (idx * pdfFontSize), pdfFontSize, field.textAlign, pdfWidth)
+              renderTextChunks(doc, line, startX, pdfY + (idx * pdfFontSize), pdfFontSize, field.textAlign)
             })
           } else {
-            // Default: Overflow
             doc.setFontSize(pdfFontSize)
-            renderTextChunks(doc, value, textX, pdfY, pdfFontSize, field.textAlign, pdfWidth)
+            renderTextChunks(doc, value, startX, pdfY, pdfFontSize, field.textAlign)
           }
         })
 
         setProgress(Math.round(((i + 1) / total) * 100))
-        // Small delay to allow UI to update
         if (i % 5 === 0) await new Promise(r => setTimeout(r, 10))
       }
 
       const pdfBlobUrl = doc.output('bloburl');
       window.open(pdfBlobUrl, '_blank');
 
-      setCompleted(true)
+      if (!singleRow) setCompleted(true)
     } catch (error) {
       console.error('PDF Generation failed:', error)
       alert('Failed to generate PDF. Check console for details.')
@@ -154,13 +163,11 @@ const GeneratePDF = () => {
     }
   }
 
-  // Separate function to render chunks with superscript support
-  const renderTextChunks = (doc, text, x, y, baseFontSize, align, maxWidth) => {
+  const renderTextChunks = (doc, text, x, y, baseFontSize, align) => {
     const chunks = parseOrdinals(text)
     const supSize = baseFontSize * 0.6
     const supOffset = baseFontSize * 0.15
 
-    // Calculate total width of all chunks to handle alignment
     let totalWidth = 0
     chunks.forEach(chunk => {
       doc.setFontSize(chunk.isSup ? supSize : baseFontSize)
@@ -182,148 +189,173 @@ const GeneratePDF = () => {
   }
 
   return (
-    <div className="flex flex-col items-center p-10 w-full h-full bg-slate-50/30 overflow-y-auto custom-scrollbar">
-      <div className="max-w-5xl w-full grid grid-cols-1 lg:grid-cols-2 gap-10">
-
-        {/* Left Side: Preview */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <Layout size={16} /> Live Sample Preview
-          </h3>
-          <div
-            className="relative bg-white p-2 rounded-2xl shadow-xl border border-slate-100 group"
-          >
-            <div className="relative overflow-hidden rounded-lg w-full h-auto" style={{ containerType: 'inline-size' }}>
-              <img src={templateUrl} alt="Template" className="w-full h-auto" />
-              {csvData && csvData.length > 0 && textFields.map(field => {
-                const fallbackText = (field.text && !field.text.startsWith('{{')) ? field.text : field.name.toUpperCase();
-                const val = String(csvData[0][field.name] || fallbackText)
-
-                const canvasWidth = templateDimensions.width * templateDimensions.scale
-                const canvasHeight = templateDimensions.height * templateDimensions.scale
-
-                let style = {
-                  position: 'absolute',
-                  left: `${(field.left / canvasWidth) * 100}%`,
-                  top: `${(field.top / canvasHeight) * 100}%`,
-                  width: `${(field.width / canvasWidth) * 100}%`,
-                  fontSize: `${(field.fontSize / canvasWidth) * 100}cqi`,
-                  color: field.fill,
-                  fontFamily: field.fontFamily || 'sans-serif',
-                  fontWeight: field.fontWeight || 'normal',
-                  fontStyle: field.fontStyle || 'normal',
-                  textAlign: field.textAlign || 'left',
-                  lineHeight: 1.16,
-                  pointerEvents: 'none'
-                }
-
-                if (field.textBehavior === 'wrap') {
-                  style.whiteSpace = 'pre-wrap'
-                  style.wordBreak = 'break-word'
-                } else if (field.textBehavior === 'shrink') {
-                  // Visual approximation of shrink using standard modern CSS limiters
-                  style.whiteSpace = 'nowrap'
-                } else {
-                  // Overflow mode
-                  style.whiteSpace = 'nowrap'
-                  style.overflow = 'visible'
-                }
-
-                return (
-                  <div key={field.id} style={style}>
-                    {parseOrdinals(val).map((chunk, idx) => (
-                      <span key={idx} style={chunk.isSup ? { fontSize: '0.6em', verticalAlign: 'super', lineHeight: 0 } : {}}>
-                        {chunk.text}
-                      </span>
-                    ))}
-                  </div>
-                )
-              })}
-            </div>
-            <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px] pointer-events-none rounded-2xl">
-              <span className="bg-white px-4 py-2 rounded-xl text-xs font-bold text-slate-800 shadow-lg select-none">WYSIWYG Mode Active</span>
-            </div>
+    <div className="flex flex-col items-center p-6 w-full h-full bg-slate-50/50 overflow-y-auto custom-scrollbar">
+      <div className="max-w-6xl w-full flex flex-col gap-8">
+        
+        {/* Header Section */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
+          <div className="space-y-1">
+            <h1 className="text-3xl font-black text-slate-800 tracking-tight">Finalize & Preview</h1>
+            <p className="text-slate-500 text-sm font-medium">Verify your data and generate certificates.</p>
           </div>
-          <p className="text-[10px] text-slate-400 text-center font-medium italic">Showing preview for: {csvData?.[0]?.[textFields[0]?.name] || 'Row 1'}</p>
+          <div className="flex items-center gap-3">
+             <div className="relative group">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-500 transition-colors" size={18} />
+                <input 
+                  type="text" 
+                  placeholder="Search entries..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 transition-all w-64 shadow-sm"
+                />
+             </div>
+             <button
+              onClick={() => generate()}
+              disabled={generating}
+              className="flex items-center gap-2 px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-sm font-bold rounded-xl shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
+            >
+              <FileText size={18} />
+              PDF Preview All
+            </button>
+          </div>
         </div>
 
-        {/* Right Side: Generation Controls */}
-        <div className="flex flex-col justify-center">
-            <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl p-10 flex flex-col items-center text-center space-y-8">
-              {completed && (
-                <div className="w-full p-6 bg-primary-50 rounded-2xl border border-primary-100 animate-in zoom-in duration-500 relative">
-                  <button 
-                    onClick={() => setCompleted(false)}
-                    className="absolute top-2 right-2 p-1 text-primary-400 hover:text-primary-600 transition-colors"
-                  >
-                    <X size={16} />
-                  </button>
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="p-3 rounded-full bg-primary-100 text-primary-600">
-                      <PartyPopper size={32} className="animate-bounce" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-black text-slate-800 tracking-tight">Success!</h3>
-                      <p className="text-xs text-slate-500 font-medium">{csvData?.length || 0} Certificates Processed Successfully</p>
-                    </div>
-                  </div>
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+          {/* Left Column: Data Table (2/3) */}
+          <div className="xl:col-span-2 space-y-4">
+             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Entry</th>
+                        {textFields.slice(0, 3).map(field => (
+                          <th key={field.id} className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">{field.name}</th>
+                        ))}
+                        <th className="px-6 py-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredData.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50 transition-colors group">
+                          <td className="px-6 py-4">
+                            <span className="text-xs font-bold text-slate-400">#{csvData.length - idx}</span>
+                          </td>
+                          {textFields.slice(0, 3).map(field => (
+                            <td key={field.id} className="px-6 py-4">
+                              <span className="text-sm font-semibold text-slate-700 truncate block max-w-[150px]">
+                                {row[field.name] || '-'}
+                              </span>
+                            </td>
+                          ))}
+                          <td className="px-6 py-4 text-right">
+                            <button 
+                              onClick={() => generate(row)}
+                              className="p-2 text-slate-400 hover:text-primary-600 hover:bg-primary-50 rounded-lg transition-all"
+                              title="Individual Preview"
+                            >
+                              <Eye size={18} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {filteredData.length === 0 && (
+                        <tr>
+                          <td colSpan={textFields.length + 2} className="px-6 py-12 text-center">
+                            <div className="flex flex-col items-center gap-2 text-slate-400">
+                              <Search size={32} strokeWidth={1.5} />
+                              <p className="text-sm font-medium">No results found for "{searchTerm}"</p>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
-              )}
+             </div>
+             <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Total displayed: {filteredData.length} entries</p>
+          </div>
 
-              <div className="relative">
-                <div className={`p-8 rounded-full bg-slate-50 transition-all duration-500 ${generating ? 'animate-pulse scale-110' : ''}`}>
-                  <FileText size={48} className={generating ? 'text-primary-600' : 'text-slate-300'} />
-                </div>
-                {generating && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <Loader2 size={64} className="text-primary-500 animate-spin" />
-                  </div>
-                )}
+          {/* Right Column: Live Preview & Progress (1/3) */}
+          <div className="space-y-6">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Live Template</h3>
+                <span className="px-2 py-0.5 bg-primary-100 text-primary-700 text-[10px] font-bold rounded-full">WYSIWYG</span>
               </div>
+              <div className="relative overflow-hidden rounded-xl border border-slate-100 aspect-[1.41] bg-slate-50" style={{ containerType: 'inline-size' }}>
+                <img src={templateUrl} alt="Template" className="w-full h-auto" />
+                {csvData && csvData.length > 0 && textFields.map(field => {
+                  const val = String(csvData[0][field.name] || field.text || '')
+                  const canvasWidth = templateDimensions.width * templateDimensions.scale
+                  const canvasHeight = templateDimensions.height * templateDimensions.scale
 
-              <div className="space-y-2">
-                <h2 className="text-2xl font-black text-slate-800">Export Options</h2>
-                <p className="text-slate-500 text-sm max-w-xs mx-auto">
-                  Processing {csvData?.length || 0} certificates at {templateDimensions.width}x{templateDimensions.height} resolution.
-                </p>
+                  return (
+                    <div 
+                      key={field.id} 
+                      style={{
+                        position: 'absolute',
+                        left: `${(field.left / canvasWidth) * 100}%`,
+                        top: `${(field.top / canvasHeight) * 100}%`,
+                        width: `${(field.width / canvasWidth) * 100}%`,
+                        fontSize: `${(field.fontSize / canvasWidth) * 100}cqi`,
+                        color: field.fill,
+                        fontFamily: field.fontFamily || 'sans-serif',
+                        fontWeight: field.fontWeight || 'normal',
+                        fontStyle: field.fontStyle || 'normal',
+                        textAlign: field.textAlign || 'left',
+                        lineHeight: 1.16,
+                        pointerEvents: 'none',
+                        whiteSpace: field.textBehavior === 'wrap' ? 'pre-wrap' : 'nowrap',
+                        overflow: field.textBehavior === 'shrink' ? 'hidden' : 'visible'
+                      }}
+                    >
+                      {val}
+                    </div>
+                  )
+                })}
               </div>
-
-              {generating ? (
-                <div className="w-full space-y-4">
-                  <div className="flex justify-between text-xs font-bold text-slate-600 mb-1">
-                    <span>Generating PDF...</span>
-                    <span>{progress}%</span>
-                  </div>
-                  <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden shadow-inner">
-                    <div
-                      className="h-full bg-gradient-to-r from-primary-500 to-primary-600 transition-all duration-300"
-                      style={{ width: `${progress}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  onClick={generate}
-                  className="w-full py-4 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-2xl shadow-xl transition-all hover:translate-y-[-4px] active:translate-y-0 flex items-center justify-center gap-3 group"
-                >
-                  <FileText size={20} className="group-hover:translate-y-1 transition-transform" />
-                  {completed ? "Generate Again" : `Preview ${csvData?.length || 0} PDFs`}
-                </button>
-              )}
-
-              <button
-                onClick={() => {
-                  setCompleted(false);
-                  setStep(1);
-                  window.location.reload();
-                }}
-                disabled={generating}
-                className="text-slate-400 hover:text-slate-800 text-xs font-bold flex items-center gap-2 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw size={14} />
-                Reset & Restart
-              </button>
             </div>
+
+            {generating && (
+              <div className="bg-white p-6 rounded-2xl border border-primary-100 shadow-lg shadow-primary-500/5 space-y-4 animate-in slide-in-from-bottom-2">
+                <div className="flex items-center justify-between text-xs font-black text-primary-600 uppercase tracking-tighter">
+                  <span className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    Generating PDFs...
+                  </span>
+                  <span>{progress}%</span>
+                </div>
+                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-primary-500 transition-all duration-300 rounded-full"
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {completed && !generating && (
+              <div className="bg-primary-50 p-6 rounded-2xl border border-primary-100 space-y-3 animate-in zoom-in-95 duration-300">
+                <div className="flex items-center gap-3 text-primary-600">
+                  <div className="p-2 bg-white rounded-xl shadow-sm">
+                    <CheckCircle2 size={24} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black tracking-tight">Success!</h4>
+                    <p className="text-[10px] font-bold opacity-70 uppercase tracking-tighter">All certificates processed</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setStep(1)}
+                  className="w-full py-2 bg-white text-primary-600 text-xs font-bold rounded-xl border border-primary-200 hover:bg-primary-100 transition-colors flex items-center justify-center gap-2"
+                >
+                  <RefreshCw size={14} />
+                  Start New Session
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -331,3 +363,4 @@ const GeneratePDF = () => {
 }
 
 export default GeneratePDF
+

@@ -1,0 +1,50 @@
+{
+  "id": "1773793036549",
+  "name": "Name, Position, Content",
+  "templateUrl": "/src/assets/images/cert.jpg",
+  "textFields": [
+    {
+      "id": "field_1",
+      "text": "Name",
+      "left": 400,
+      "top": 300,
+      "fontSize": 40,
+      "fontFamily": "Inter",
+      "fill": "#000000",
+      "fontWeight": "bold",
+      "fontStyle": "normal",
+      "underline": false,
+      "variable": "Name"
+    },
+    {
+      "id": "field_2",
+      "text": "Position",
+      "left": 400,
+      "top": 350,
+      "fontSize": 30,
+      "fontFamily": "Inter",
+      "fill": "#000000",
+      "fontWeight": "normal",
+      "fontStyle": "normal",
+      "underline": false,
+      "variable": "Position"
+    },
+    {
+      "id": "field_3",
+      "text": "Content",
+      "left": 400,
+      "top": 450,
+      "fontSize": 24,
+      "fontFamily": "Inter",
+      "fill": "#333333",
+      "fontWeight": "normal",
+      "fontStyle": "normal",
+      "underline": false,
+      "variable": "Content"
+    }
+  ],
+  "requiredCustomFonts": [
+    "Inter-Bold.ttf",
+    "Inter-Regular.ttf"
+  ]
+}

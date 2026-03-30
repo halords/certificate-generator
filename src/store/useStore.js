@@ -16,8 +16,16 @@ export const useStore = create((set) => ({
   csvHeaders: [],
   setCsvHeaders: (headers) => set({ csvHeaders: headers }),
 
-  customFonts: [], // Array of { name, arrayBuffer }
-  addCustomFont: (font) => set((state) => ({ customFonts: [...state.customFonts, font] })),
+  builtInPresets: [],
+  setBuiltInPresets: (presets) => set({ builtInPresets: presets }),
+
+  customFonts: [], // Array of { name, dataUri }
+  setCustomFonts: (fonts) => set({ customFonts: fonts }),
+  addCustomFont: (font) => set((state) => ({ 
+    customFonts: state.customFonts.find(f => f.name === font.name) 
+      ? state.customFonts 
+      : [...state.customFonts, font] 
+  })),
 
   templateDimensions: { width: 0, height: 0, scale: 1 },
   setTemplateDimensions: (dims) => set({ templateDimensions: dims })
