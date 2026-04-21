@@ -1,0 +1,44 @@
+{
+  "id": "1776158000019",
+  "name": "Name, Content v2",
+  "templateUrl": "cert.jpg",
+  "textFields": [
+    {
+      "id": "field_1",
+      "name": "name",
+      "text": "NAME",
+      "fontSize": 70,
+      "fill": "#000000",
+      "fontFamily": "Proxima Nova Extrabold",
+      "fontWeight": "bold",
+      "fontStyle": "normal",
+      "textAlign": "center",
+      "textBehavior": "shrink",
+      "left": 70.58823529411765,
+      "top": 288,
+      "width": 637.6271306507077,
+      "height": 79.1
+    },
+    {
+      "id": "field_2",
+      "name": "content",
+      "text": "CONTENT",
+      "fontSize": 19,
+      "fill": "#333333",
+      "fontFamily": "Proxima Nova Regular",
+      "fontWeight": "normal",
+      "fontStyle": "normal",
+      "textAlign": "center",
+      "textBehavior": "wrap",
+      "left": 114.29102322497829,
+      "top": 357,
+      "width": 543.5537689475552,
+      "height": 21.47
+    }
+  ],
+  "requiredCustomFonts": [
+    "/src/assets/fonts/Proxima Nova Extrabold.ttf",
+    "/src/assets/fonts/Proxima Nova Regular.ttf"
+  ],
+  "timestamp": "2026-04-14T09:14:09.723Z"
+}

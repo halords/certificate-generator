@@ -1,32 +1,49 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
-export const useStore = create((set) => ({
-  currentStep: 1,
-  setStep: (step) => set({ currentStep: step }),
+export const useStore = create(
+  persist(
+    (set) => ({
+      currentStep: 1,
+      setStep: (step) => set({ currentStep: step }),
 
-  templateUrl: null, // data URL of the uploaded template image
-  setTemplateUrl: (url) => set({ templateUrl: url }),
+      templateUrl: null,
+      setTemplateUrl: (url) => set({ templateUrl: url }),
 
-  textFields: [], // Array of objects: { id, name, text, fontFamily, fontSize, fill, fontWeight, fontStyle, left, top, width, height }
-  setTextFields: (fields) => set({ textFields: fields }),
+      textFields: [],
+      setTextFields: (fields) => set({ textFields: fields }),
 
-  csvData: null, // Array of parsed CSV rows (objects)
-  setCsvData: (data) => set({ csvData: data }),
-  
-  csvHeaders: [],
-  setCsvHeaders: (headers) => set({ csvHeaders: headers }),
+      csvData: null,
+      setCsvData: (data) => set({ csvData: data }),
+      
+      csvHeaders: [],
+      setCsvHeaders: (headers) => set({ csvHeaders: headers }),
 
-  builtInPresets: [],
-  setBuiltInPresets: (presets) => set({ builtInPresets: presets }),
+      builtInPresets: [],
+      setBuiltInPresets: (presets) => set({ builtInPresets: presets }),
 
-  customFonts: [], // Array of { name, dataUri }
-  setCustomFonts: (fonts) => set({ customFonts: fonts }),
-  addCustomFont: (font) => set((state) => ({ 
-    customFonts: state.customFonts.find(f => f.name === font.name) 
-      ? state.customFonts 
-      : [...state.customFonts, font] 
-  })),
+      systemFonts: [], // Built-in fonts from assets folder
+      setSystemFonts: (fonts) => set({ systemFonts: fonts }),
 
-  templateDimensions: { width: 0, height: 0, scale: 1 },
-  setTemplateDimensions: (dims) => set({ templateDimensions: dims })
-}))
+      customFonts: [], // User-uploaded fonts
+      setCustomFonts: (fonts) => set({ customFonts: fonts }),
+      addCustomFont: (font) => set((state) => ({ 
+        customFonts: state.customFonts.find(f => f.name === font.name) 
+          ? state.customFonts 
+          : [...state.customFonts, font] 
+      })),
+
+      templateDimensions: { width: 0, height: 0, scale: 1 },
+      setTemplateDimensions: (dims) => set({ templateDimensions: dims })
+    }),
+    {
+      name: 'certificate-storage',
+      partialize: (state) => ({
+        templateUrl: state.templateUrl,
+        textFields: state.textFields,
+        customFonts: state.customFonts,
+        templateDimensions: state.templateDimensions
+      }),
+    }
+  )
+)

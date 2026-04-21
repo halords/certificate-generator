@@ -4,7 +4,7 @@ import { fabric } from 'fabric'
 import { Type, Trash2, ChevronRight, Layout, Settings2, Palette, ListChecks, Type as FontIcon, AlignLeft, AlignCenter, AlignRight, Maximize, WrapText, ArrowRightToLine, Upload, Save, Bookmark, X, Plus, FileUp, Download, Edit2, Check } from 'lucide-react'
 
 const CanvasEditor = () => {
-  const { templateUrl, textFields, setTextFields, setStep, setTemplateDimensions, builtInPresets, setBuiltInPresets, customFonts, setCustomFonts, addCustomFont } = useStore()
+  const { templateUrl, textFields, setTextFields, setStep, setTemplateDimensions, builtInPresets, setBuiltInPresets, customFonts, setCustomFonts, addCustomFont, systemFonts, setSystemFonts } = useStore()
   const canvasRef = useRef(null)
   const fabricCanvas = useRef(null)
   
@@ -26,22 +26,26 @@ const CanvasEditor = () => {
   const templateInputRef = useRef(null)
   const importInputRef = useRef(null)
 
-  // Dynamic import of built-in presets
+  // Dynamic import of built-in presets and assets
   useEffect(() => {
     const presetModules = import.meta.glob('/src/assets/presets/*.json', { eager: true });
     const loadedPresets = Object.values(presetModules).map(module => module.default || module);
     setBuiltInPresets(loadedPresets);
+    
+    // Also map built-in images for easy resolution
+    const imageModules = import.meta.glob('/src/assets/images/*.{jpg,png,jpeg,webp}', { query: '?url', import: 'default', eager: true });
+    window._builtInImages = imageModules;
   }, []);
 
   // Auto-load fonts from src/assets/fonts
   useEffect(() => {
-    const fontModules = import.meta.glob('/src/assets/fonts/*.{ttf,otf}', { as: 'url', eager: true });
+    const fontModules = import.meta.glob('/src/assets/fonts/*.{ttf,otf}', { query: '?url', import: 'default', eager: true });
     
     const loadFonts = async () => {
       const fontList = [];
       for (const [path, url] of Object.entries(fontModules)) {
         const baseName = path.split('/').pop().split('.').slice(0, -1).join('.');
-        const fontFamilyName = baseName.replace(/[^a-zA-Z0-9]/g, '');
+        const fontFamilyName = baseName; // Use the actual filename as font family name
         
         try {
           const response = await fetch(url);
@@ -49,19 +53,18 @@ const CanvasEditor = () => {
           const reader = new FileReader();
           
           await new Promise((resolve) => {
-            reader.onloadend = () => {
+            reader.onloadend = async () => {
               const dataUri = reader.result;
               fontList.push({ name: fontFamilyName, dataUri });
               
-              // Also inject into document head for Fabric.js
-              const newStyle = document.createElement('style');
-              newStyle.appendChild(document.createTextNode(`
-                @font-face {
-                  font-family: '${fontFamilyName}';
-                  src: url('${dataUri}');
-                }
-              `));
-              document.head.appendChild(newStyle);
+              // Use modern FontFace API
+              try {
+                const font = new FontFace(fontFamilyName, `url(${dataUri})`);
+                await font.load();
+                document.fonts.add(font);
+              } catch (err) {
+                console.error(`Error loading font face: ${fontFamilyName}`, err);
+              }
               resolve();
             };
             reader.readAsDataURL(blob);
@@ -70,11 +73,34 @@ const CanvasEditor = () => {
           console.error(`Failed to load font: ${fontFamilyName}`, err);
         }
       }
-      setCustomFonts(fontList);
+      setSystemFonts(fontList);
     };
 
     loadFonts();
   }, []);
+
+  // Effect to inject custom fonts from store into document head
+  useEffect(() => {
+    const loadCustomFonts = async () => {
+      for (const font of customFonts) {
+        // Check if already loaded
+        const isLoaded = Array.from(document.fonts).some(f => f.family === font.name);
+        if (!isLoaded) {
+          try {
+            const fontFace = new FontFace(font.name, `url(${font.dataUri})`);
+            await fontFace.load();
+            document.fonts.add(fontFace);
+          } catch (err) {
+            console.error(`Error loading custom font face: ${font.name}`, err);
+          }
+        }
+      }
+      if (fabricCanvas.current) {
+        fabricCanvas.current.renderAll();
+      }
+    };
+    loadCustomFonts();
+  }, [customFonts]);
 
   // Combine built-in and localStorage presets
   const allPresets = [...builtInPresets, ...localStoragePresets];
@@ -95,10 +121,13 @@ const CanvasEditor = () => {
     if (!newPresetName.trim()) return
     
     // Identified unique custom fonts used in current textFields
-    const customFontNames = useStore.getState().customFonts.map(f => f.name)
+    const allLoadableFontNames = [
+      ...systemFonts.map(f => f.name),
+      ...useStore.getState().customFonts.map(f => f.name)
+    ]
     const requiredCustomFonts = [...new Set(
       textFields
-        .filter(f => customFontNames.includes(f.fontFamily))
+        .filter(f => allLoadableFontNames.includes(f.fontFamily))
         .map(f => f.fontFamily)
     )]
 
@@ -128,18 +157,37 @@ const CanvasEditor = () => {
   const loadPreset = (preset) => {
     if (!window.confirm(`Load preset "${preset.name}"? This will replace your current design.`)) return
     
+    // Reset missing fonts state
+    setMissingFonts([])
+
+    // Resolve template URL
+    let resolvedUrl = preset.templateUrl
+    if (resolvedUrl && !resolvedUrl.startsWith('data:') && !resolvedUrl.startsWith('http')) {
+      // Try to find in built-in images
+      const imgKey = Object.keys(window._builtInImages || {}).find(k => k.endsWith(resolvedUrl))
+      if (imgKey) {
+        resolvedUrl = window._builtInImages[imgKey]
+      }
+    }
+
     // Update store
-    useStore.getState().setTemplateUrl(preset.templateUrl)
+    useStore.getState().setTemplateUrl(resolvedUrl)
     useStore.getState().setTextFields(preset.textFields)
     setLoadCounter(c => c + 1)
     setActivePresetId(preset.id)
 
-    // Check for missing fonts
-    const currentCustomFonts = useStore.getState().customFonts.map(f => f.name)
-    const missing = (preset.requiredCustomFonts || []).filter(f => !currentCustomFonts.includes(f))
+    // Check for missing fonts in both built-in, system, and custom
+    const loadedFontNames = [
+      ...defaultFonts,
+      ...systemFonts.map(f => f.name),
+      ...useStore.getState().customFonts.map(f => f.name)
+    ]
+    const missing = (preset.requiredCustomFonts || []).filter(f => {
+      // Extract basename if it's a path (e.g. /src/assets/fonts/Font.ttf -> Font)
+      const baseName = f.split('/').pop().split('.').slice(0, -1).join('.')
+      return !loadedFontNames.includes(baseName) && !loadedFontNames.includes(f)
+    })
     setMissingFonts(missing)
-    
-    // The useEffect[templateUrl, loadCounter] in CanvasEditor will handle re-initializing the fabric canvas
   }
 
   const updatePreset = (id, e) => {
@@ -645,21 +693,20 @@ const CanvasEditor = () => {
     files.forEach(file => {
       // Remove extension to use as font-family name, remove spaces/special chars
       const baseName = file.name.split('.').slice(0, -1).join('.');
-      const fontFamilyName = baseName.replace(/[^a-zA-Z0-9]/g, '');
+      const fontFamilyName = baseName;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const result = event.target.result; // Data URL
         
-        // Inject CSS rule so the canvas can render it
-        const newStyle = document.createElement('style');
-        newStyle.appendChild(document.createTextNode(`
-          @font-face {
-            font-family: '${fontFamilyName}';
-            src: url('${result}');
-          }
-        `));
-        document.head.appendChild(newStyle);
+        // Use modern FontFace API
+        try {
+          const fontFace = new FontFace(fontFamilyName, `url(${result})`);
+          await fontFace.load();
+          document.fonts.add(fontFace);
+        } catch (err) {
+          console.error(`Error loading uploaded font: ${fontFamilyName}`, err);
+        }
 
         // Save to store so GeneratePDF can embed it
         useStore.getState().addCustomFont({

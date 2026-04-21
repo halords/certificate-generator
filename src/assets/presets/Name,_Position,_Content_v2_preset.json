@@ -1,0 +1,60 @@
+{
+  "id": "1776157712141",
+  "name": "Name, Position, Content v2",
+  "templateUrl": "cert.jpg",
+  "textFields": [
+    {
+      "id": "field_1",
+      "name": "name",
+      "text": "NAME",
+      "fontSize": 60,
+      "fill": "#000000",
+      "fontFamily": "Proxima Nova Extrabold",
+      "fontWeight": "bold",
+      "fontStyle": "normal",
+      "textAlign": "center",
+      "textBehavior": "shrink",
+      "left": 70.3172332139718,
+      "top": 275,
+      "width": 635.4989662432961,
+      "height": 67.8
+    },
+    {
+      "id": "field_2",
+      "name": "position",
+      "text": "POSITION",
+      "fontSize": 30,
+      "fill": "#000000",
+      "fontFamily": "Proxima Nova Regular",
+      "fontWeight": "normal",
+      "fontStyle": "normal",
+      "textAlign": "center",
+      "textBehavior": "shrink",
+      "left": 71.31663753240366,
+      "top": 320,
+      "width": 633.5001576064323,
+      "height": 33.9
+    },
+    {
+      "id": "field_3",
+      "name": "content",
+      "text": "CONTENT",
+      "fontSize": 20,
+      "fill": "#333333",
+      "fontFamily": "Proxima Nova Regular",
+      "fontWeight": "normal",
+      "fontStyle": "normal",
+      "textAlign": "center",
+      "textBehavior": "wrap",
+      "left": 102.29817140379441,
+      "top": 362,
+      "width": 569.5382812267867,
+      "height": 22.599999999999998
+    }
+  ],
+  "requiredCustomFonts": [
+    "/src/assets/fonts/Proxima Nova Extrabold.ttf",
+    "/src/assets/fonts/Proxima Nova Regular.ttf"
+  ],
+  "timestamp": "2026-04-14T09:09:34.709Z"
+}

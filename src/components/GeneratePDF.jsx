@@ -4,7 +4,7 @@ import { jsPDF } from 'jspdf'
 import { Download, FileText, Loader2, PartyPopper, RefreshCw, CheckCircle2, Layout, X, Search, Eye } from 'lucide-react'
 
 const GeneratePDF = () => {
-  const { templateUrl, textFields, csvData, setStep, templateDimensions, customFonts } = useStore()
+  const { templateUrl, textFields, csvData, setStep, templateDimensions, customFonts, systemFonts } = useStore()
   const [generating, setGenerating] = useState(false)
   const [progress, setProgress] = useState(0)
   const [completed, setCompleted] = useState(false)
@@ -71,19 +71,20 @@ const GeneratePDF = () => {
 
       const total = dataToProcess.length
 
-      if (customFonts && customFonts.length > 0) {
-        customFonts.forEach((font) => {
-          const base64Str = font.dataUri.split(',')[1]
-          if (base64Str) {
-            const filename = `${font.name}.ttf`
-            doc.addFileToVFS(filename, base64Str)
-            doc.addFont(filename, font.name, 'normal')
-            doc.addFont(filename, font.name, 'bold')
-            doc.addFont(filename, font.name, 'italic')
-            doc.addFont(filename, font.name, 'bolditalic')
-          }
-        })
-      }
+      // Embed both system assets and user-uploaded custom fonts
+      const allFontsForPdf = [...(systemFonts || []), ...(customFonts || [])]
+      
+      allFontsForPdf.forEach((font) => {
+        const base64Str = font.dataUri.split(',')[1]
+        if (base64Str) {
+          const filename = `${font.name}.ttf`
+          doc.addFileToVFS(filename, base64Str)
+          doc.addFont(filename, font.name, 'normal')
+          doc.addFont(filename, font.name, 'bold')
+          doc.addFont(filename, font.name, 'italic')
+          doc.addFont(filename, font.name, 'bolditalic')
+        }
+      })
 
       for (let i = 0; i < total; i++) {
         if (i > 0) doc.addPage([imgWidth, imgHeight])
